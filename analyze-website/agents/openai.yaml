@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Website"
+  short_description: "Analyze a site with a 14-dimension framework"
+  default_prompt: "Use $analyze-website to analyze this website, save the result as a Markdown file named after the website domain, and then summarize the findings in chat."
