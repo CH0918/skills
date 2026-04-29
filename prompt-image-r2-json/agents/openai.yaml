@@ -1,0 +1,3 @@
+display_name: Prompt Image R2 JSON
+short_description: Generate images and R2 JSON records
+default_prompt: Turn this Chinese image prompt into an English prompt, generate the image, upload it to R2, and write the JSON record.
