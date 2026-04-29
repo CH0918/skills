@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI 需求词挖掘"
+  short_description: "结合模型能力和词根批量生成并评估需求关键词机会清单"
+  default_prompt: "Use $ai-demand-keyword-research 基于本地 models、飞书词根和 sem.3ue.co 生成 100 个需求词并输出 Markdown 表格。"
