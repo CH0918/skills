@@ -1,0 +1,4 @@
+interface:
+  display_name: "Collect Playground Data"
+  short_description: "Create SEO-ready playground JSON from prompts"
+  default_prompt: "Use $collect-playground-data to turn these social media prompts into Img2AI playground JSON."
