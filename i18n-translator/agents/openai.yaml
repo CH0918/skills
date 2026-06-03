@@ -1,0 +1,4 @@
+interface:
+  display_name: "I18n Translator"
+  short_description: "同步 JSON 多语言文件并补齐缺失键"
+  default_prompt: "Use $i18n-translator to sync missing locale keys from en.json into target language JSON files."
