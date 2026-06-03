@@ -21,6 +21,17 @@ PathParts = List[str]
 
 DEFAULT_MODEL = "gemini-2.5-flash[1m]"
 DEFAULT_BASE_URL = "http://8.134.145.9:8080"
+DEFAULT_TIMEOUT = 300
+DEFAULT_MAX_TOKENS = 4096
+DEFAULT_TEMPERATURE = 0
+DEFAULT_BATCH_SIZE = 50
+DEFAULT_DELAY_BETWEEN_BATCHES = 1500
+DEFAULT_MAX_CONCURRENCY = 6
+DEFAULT_CONCURRENCY_THRESHOLD = 10
+DEFAULT_MAX_PROMPT_KB = 128
+DEFAULT_RETRIES = 1
+DEFAULT_RETRY_DELAY = 1500
+CONFIG_ENV_NAME = "I18N_TRANSLATOR_CONFIG"
 
 LANG_NAMES: Dict[str, str] = {
     "ar": "阿拉伯语",
@@ -49,6 +60,73 @@ LANG_NAMES: Dict[str, str] = {
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as file:
         return json.load(file)
+
+
+def script_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def skill_dir() -> Path:
+    return script_dir().parent
+
+
+def default_config_paths() -> List[Path]:
+    return [
+        skill_dir() / "config.json",
+        Path.home() / ".codex" / "i18n-translator" / "config.json",
+    ]
+
+
+def load_config(path_value: str | None = None) -> JsonObject:
+    candidates: List[Path] = []
+    if path_value:
+        candidates.append(Path(path_value).expanduser())
+    elif os.environ.get(CONFIG_ENV_NAME):
+        candidates.append(Path(os.environ[CONFIG_ENV_NAME]).expanduser())
+    else:
+        candidates.extend(default_config_paths())
+
+    for path in candidates:
+        if path.exists():
+            data = load_json(path)
+            if not isinstance(data, dict):
+                raise ValueError(f"Config file must contain a JSON object: {path}")
+            data["_configPath"] = str(path)
+            return data
+    return {}
+
+
+def config_value(args: argparse.Namespace, config: JsonObject, attr: str, env_name: str, config_name: str, default: Any = None) -> Any:
+    value = getattr(args, attr, None)
+    if value is not None:
+        return value
+    if os.environ.get(env_name):
+        return os.environ[env_name]
+    return config.get(config_name, default)
+
+
+def apply_runtime_config(args: argparse.Namespace) -> None:
+    config = load_config(getattr(args, "config", None))
+    args.config_data = config
+    args.auth_token = config_value(args, config, "auth_token", "ANTHROPIC_AUTH_TOKEN", "authToken")
+    args.base_url = config_value(args, config, "base_url", "ANTHROPIC_BASE_URL", "baseUrl", DEFAULT_BASE_URL)
+    args.model = config_value(args, config, "model", "ANTHROPIC_MODEL", "model", DEFAULT_MODEL)
+    args.timeout = int(config_value(args, config, "timeout", "I18N_TRANSLATOR_TIMEOUT", "timeout", DEFAULT_TIMEOUT))
+    args.max_tokens = int(config_value(args, config, "max_tokens", "I18N_TRANSLATOR_MAX_TOKENS", "maxTokens", DEFAULT_MAX_TOKENS))
+    args.temperature = float(config_value(args, config, "temperature", "I18N_TRANSLATOR_TEMPERATURE", "temperature", DEFAULT_TEMPERATURE))
+
+    batch_config = config.get("batch") if isinstance(config.get("batch"), dict) else {}
+    args.batch_size = int(config_value(args, batch_config, "batch_size", "I18N_TRANSLATOR_BATCH_SIZE", "batchSize", DEFAULT_BATCH_SIZE))
+    args.delay_between_batches = int(
+        config_value(args, batch_config, "delay_between_batches", "I18N_TRANSLATOR_DELAY_BETWEEN_BATCHES", "delayBetweenBatches", DEFAULT_DELAY_BETWEEN_BATCHES)
+    )
+    args.max_concurrency = int(config_value(args, batch_config, "max_concurrency", "I18N_TRANSLATOR_MAX_CONCURRENCY", "maxConcurrency", DEFAULT_MAX_CONCURRENCY))
+    args.concurrency_threshold = int(
+        config_value(args, batch_config, "concurrency_threshold", "I18N_TRANSLATOR_CONCURRENCY_THRESHOLD", "concurrencyThreshold", DEFAULT_CONCURRENCY_THRESHOLD)
+    )
+    args.max_prompt_kb = float(config_value(args, batch_config, "max_prompt_kb", "I18N_TRANSLATOR_MAX_PROMPT_KB", "maxPromptKb", DEFAULT_MAX_PROMPT_KB))
+    args.retries = int(config_value(args, batch_config, "retries", "I18N_TRANSLATOR_RETRIES", "retries", DEFAULT_RETRIES))
+    args.retry_delay = int(config_value(args, batch_config, "retry_delay", "I18N_TRANSLATOR_RETRY_DELAY", "retryDelay", DEFAULT_RETRY_DELAY))
 
 
 def write_json(path: Path, data: Any) -> None:
@@ -326,12 +404,17 @@ def parse_batch_response(text: str, original_tasks: List[JsonObject]) -> List[Js
 
 
 def call_anthropic(prompt: str, args: argparse.Namespace, batch_id: str) -> str:
-    token = args.auth_token or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    token = args.auth_token
     if not token:
-        raise RuntimeError("Missing ANTHROPIC_AUTH_TOKEN.")
+        searched = [str(path) for path in default_config_paths()]
+        raise RuntimeError(
+            "Missing API key. Set authToken in config.json, pass --auth-token, "
+            f"set ANTHROPIC_AUTH_TOKEN, or set {CONFIG_ENV_NAME}. "
+            f"Default config paths: {searched}"
+        )
 
-    base_url = (args.base_url or os.environ.get("ANTHROPIC_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-    model = args.model or os.environ.get("ANTHROPIC_MODEL") or DEFAULT_MODEL
+    base_url = args.base_url.rstrip("/")
+    model = args.model
     endpoint = f"{base_url}/v1/messages"
     payload = {
         "model": model,
@@ -538,6 +621,7 @@ def apply_translations(args: argparse.Namespace) -> int:
 
 
 def translate(args: argparse.Namespace) -> int:
+    apply_runtime_config(args)
     locale_dir = Path(args.locale_dir)
     manifest = build_manifest(locale_dir, args.base, args.targets)
     tasks_by_language = flatten_manifest(manifest)
@@ -582,6 +666,7 @@ def translate(args: argparse.Namespace) -> int:
 
 
 def test_api(args: argparse.Namespace) -> int:
+    apply_runtime_config(args)
     prompt = (
         "请只返回 JSON：{\"translations\":[{\"key\":\"common.save\",\"text\":\"保存\"}]}。"
         "不要返回 Markdown。"
@@ -617,34 +702,40 @@ def main(argv: Iterable[str] | None = None) -> int:
     translate_parser.add_argument("--translations-output", help="Write translated mapping to this JSON file.")
     translate_parser.add_argument("--no-apply", action="store_true", help="Only output translations; do not update locale files.")
     translate_parser.add_argument("--backup", action="store_true")
-    translate_parser.add_argument("--batch-size", type=int, default=50)
-    translate_parser.add_argument("--delay-between-batches", type=int, default=1500)
-    translate_parser.add_argument("--max-concurrency", type=int, default=6)
-    translate_parser.add_argument("--concurrency-threshold", type=int, default=10)
-    translate_parser.add_argument("--max-prompt-kb", type=float, default=128)
+    translate_parser.add_argument("--batch-size", type=int)
+    translate_parser.add_argument("--delay-between-batches", type=int)
+    translate_parser.add_argument("--max-concurrency", type=int)
+    translate_parser.add_argument("--concurrency-threshold", type=int)
+    translate_parser.add_argument("--max-prompt-kb", type=float)
+    translate_parser.add_argument("--config", help="Path to config JSON. Defaults to skill config.json or ~/.codex/i18n-translator/config.json.")
     translate_parser.add_argument("--base-url")
     translate_parser.add_argument("--auth-token")
-    translate_parser.add_argument("--model", default=DEFAULT_MODEL)
-    translate_parser.add_argument("--timeout", type=int, default=300)
-    translate_parser.add_argument("--max-tokens", type=int, default=4096)
-    translate_parser.add_argument("--temperature", type=float, default=0)
-    translate_parser.add_argument("--retries", type=int, default=1)
-    translate_parser.add_argument("--retry-delay", type=int, default=1500)
+    translate_parser.add_argument("--model")
+    translate_parser.add_argument("--timeout", type=int)
+    translate_parser.add_argument("--max-tokens", type=int)
+    translate_parser.add_argument("--temperature", type=float)
+    translate_parser.add_argument("--retries", type=int)
+    translate_parser.add_argument("--retry-delay", type=int)
     translate_parser.set_defaults(func=translate)
 
     test_parser = subparsers.add_parser("test-api", help="Test the Anthropic-compatible translation API.")
+    test_parser.add_argument("--config", help="Path to config JSON. Defaults to skill config.json or ~/.codex/i18n-translator/config.json.")
     test_parser.add_argument("--base-url")
     test_parser.add_argument("--auth-token")
-    test_parser.add_argument("--model", default=DEFAULT_MODEL)
-    test_parser.add_argument("--timeout", type=int, default=60)
-    test_parser.add_argument("--max-tokens", type=int, default=512)
-    test_parser.add_argument("--temperature", type=float, default=0)
-    test_parser.add_argument("--retries", type=int, default=0)
-    test_parser.add_argument("--retry-delay", type=int, default=1500)
+    test_parser.add_argument("--model")
+    test_parser.add_argument("--timeout", type=int)
+    test_parser.add_argument("--max-tokens", type=int)
+    test_parser.add_argument("--temperature", type=float)
+    test_parser.add_argument("--retries", type=int)
+    test_parser.add_argument("--retry-delay", type=int)
     test_parser.set_defaults(func=test_api)
 
     args = parser.parse_args(list(argv) if argv is not None else None)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except Exception as error:  # noqa: BLE001 - keep CLI output concise for agents and users.
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

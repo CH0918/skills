@@ -39,10 +39,6 @@ python <skill-dir>/scripts/sync_i18n.py apply path/to/locales /tmp/i18n-translat
 Batch translate and apply in one command:
 
 ```bash
-export ANTHROPIC_AUTH_TOKEN="your-api-key"
-export ANTHROPIC_BASE_URL="http://8.134.145.9:8080"
-export ANTHROPIC_MODEL="gemini-2.5-flash[1m]"
-
 python <skill-dir>/scripts/sync_i18n.py translate path/to/locales \
   --targets zh,ja,fr \
   --batch-size 50 \
@@ -54,12 +50,54 @@ python <skill-dir>/scripts/sync_i18n.py translate path/to/locales \
 Test the configured Anthropic-compatible API before a large translation run:
 
 ```bash
-export ANTHROPIC_AUTH_TOKEN="your-api-key"
-export ANTHROPIC_BASE_URL="http://8.134.145.9:8080"
-export ANTHROPIC_MODEL="gemini-2.5-flash[1m]"
-
 python <skill-dir>/scripts/sync_i18n.py test-api
 ```
+
+## Configuration
+
+Create a local config file before using `translate` or `test-api`:
+
+```bash
+cp <skill-dir>/config.example.json <skill-dir>/config.json
+```
+
+Then edit `config.json`:
+
+```json
+{
+  "authToken": "your-api-key",
+  "baseUrl": "http://8.134.145.9:8080",
+  "model": "gemini-2.5-flash[1m]",
+  "timeout": 300,
+  "maxTokens": 4096,
+  "temperature": 0,
+  "batch": {
+    "batchSize": 50,
+    "delayBetweenBatches": 1500,
+    "maxConcurrency": 6,
+    "concurrencyThreshold": 10,
+    "maxPromptKb": 128,
+    "retries": 1,
+    "retryDelay": 1500
+  }
+}
+```
+
+`config.json` is ignored by git. Do not commit real API keys.
+
+Config lookup order:
+
+1. `--config /path/to/config.json`
+2. `I18N_TRANSLATOR_CONFIG=/path/to/config.json`
+3. `<skill-dir>/config.json`
+4. `~/.codex/i18n-translator/config.json`
+
+Runtime value priority:
+
+1. Explicit CLI flags such as `--model` or `--batch-size`
+2. Environment variables such as `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`
+3. Config file values
+4. Script defaults
 
 The apply command accepts either format:
 
@@ -101,7 +139,7 @@ Keep the Flat Copilot plugin's tuned batch behavior:
 - Keep a `128KB` max prompt guard per batch, matching the original plugin's prompt-size protection.
 - Do not create `.bak` files by default. Add `--backup` only when the user explicitly asks to keep file backups.
 
-The script calls an Anthropic-compatible relay. Read the API key from `ANTHROPIC_AUTH_TOKEN`; never hard-code it in skill files, shell history, or committed examples. Configure `ANTHROPIC_BASE_URL` and `ANTHROPIC_MODEL` from the environment when the relay or model changes. Default base URL is `http://8.134.145.9:8080`; default model is `gemini-2.5-flash[1m]`.
+The script calls an Anthropic-compatible relay. Read the API key from config or `ANTHROPIC_AUTH_TOKEN`; never hard-code it in committed files. Configure `baseUrl` and `model` in `config.json` when the relay or model changes. Default base URL is `http://8.134.145.9:8080`; default model is `gemini-2.5-flash[1m]`.
 
 ## Language Reference
 
